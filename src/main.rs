@@ -2,6 +2,16 @@ use hack_assembler;
 use std::fs;
 use std::thread;
 
+// Draw some multi-colored geometry to the screen
+extern crate quicksilver;
+ 
+use quicksilver::{
+    Result,
+    geom::{Shape, Vector},
+    graphics::{Background::Img, Color, Image, PixelFormat},
+    lifecycle::{Settings, State, Window, run},
+};
+ 
 const ADDRESSABLE_MEM_SIZE: usize = 0x7FFF;
 
 struct Memory32K {
@@ -69,6 +79,7 @@ impl HackEmulator {
         
         // we have an intermediate binary because we prepopulate rom 
         let mut binary = Vec::new();
+        //print!("{}\n", assembler_output);
         hack_assembler::generate_binary(assembler_output, &mut binary);
         
         // copy the instructions into rom
@@ -79,11 +90,12 @@ impl HackEmulator {
     }
     
     fn run(&mut self) {
-        loop {
-            print!("A: {}\nD: {}\nPC: {}\n\n", self.cpu.a, self.cpu.d, self.cpu.pc);
-            self.execute(1);
-            thread::sleep(std::time::Duration::from_secs(1));
+        print!("A: {}\nD: {}\nPC: {}\n\n", self.cpu.a, self.cpu.d, self.cpu.pc);
+        // we've entered a new part of the program we haven't been able to yet. We should have image by now
+        if self.cpu.pc == 19788 {
+            thread::sleep(std::time::Duration::from_millis(10000));
         }
+        self.execute(1);    
     }
     
     /// decodes and executes instructions for duration_in_cycles. Note: 
@@ -91,6 +103,7 @@ impl HackEmulator {
     fn execute(&mut self, duration_in_cycles : usize) {
         for _ in 0..duration_in_cycles {
             let instruction = self.rom.memory[self.cpu.pc as usize];
+            //print!("instruction: {:b}\n", instruction);
             
             // a-instruction
             let is_jump;
@@ -112,11 +125,12 @@ impl HackEmulator {
     }
     
     fn execute_c_instruction(&mut self, instruction: i16) -> bool {
-        let comp_raw = (instruction & 0xFC0) >> 6 ;
+        let comp_raw = (instruction & 0xFC0) >> 6;
         let dest_raw = (instruction & 0x38) >> 3;
         let jump_raw = instruction & 0x7;
         let a_raw = instruction & 0x1000;
         
+        //print!("dest: {:b},\ncomp: {:b}\njump: {:b}\n", dest_raw, comp_raw, jump_raw);
         let comp; 
         match comp_raw {
             0b101010 => comp = 0,
@@ -166,14 +180,52 @@ impl HackEmulator {
         return is_jump;
     }
 }
+ 
+impl State for HackEmulator {
+    fn new() -> Result<HackEmulator> {
+        
+        let mut emulator = HackEmulator::new();
+        emulator.load_rom_from_file("PongL.asm");
+        
+        // // debug dump instructions in rom
+        // for i in 0..emulator.num_instructions {
+        //     print!("{}\n", emulator.rom.memory[i]);
+        // }
+        
+        return Ok(emulator);
+    }
+ 
+    fn draw(&mut self, window: &mut Window) -> Result<()> {
+        self.run();
+        
+        window.clear(Color::WHITE)?;
+        // screen layout: https://b1391bd6-da3d-477d-8c01-38cdf774495a.filesusr.com/ugd/44046b_7ef1c00a714c46768f08c459a6cab45a.pdf
+        //RAM[16384 + r*32 + c/16]
+        let mut arr = vec![0; 512*256*3];
+        let mut j = 0;
+        for i in 0x4000..0x6000 {
+            let p = self.ram.memory[i];
+            for b in 0..16 {
+                let c = 255 - (((p >> b) & 1) * 255) as u8;
+                arr[j] = c;
+                arr[j + 1] = c;
+                arr[j + 2] = c;
+                j += 3;
+            }
+        }
+        
+        let image: Image = Image::from_raw(&arr, 512,256, PixelFormat::RGB)?;
+        window.draw(&image.area().with_center((256, 128)), Img(&image));
+        Ok(())
+    }
+}
 
 fn main() {
-    let mut emulator = HackEmulator::new();
-    emulator.load_rom_from_file("test.asm");
-    emulator.run();
+    run::<HackEmulator>("HackEmulator", Vector::new(512, 256), Settings::default());
+
     
-    // debug dump instructions in rom
-    for i in 0..emulator.num_instructions {
-        print!("{}\n", emulator.rom.memory[i]);
-    }
+    // emulator loop
+    // let mut emulator = HackEmulator::new();
+    // emulator.load_rom_from_file("test.asm");
+    // emulator.run();
 }
